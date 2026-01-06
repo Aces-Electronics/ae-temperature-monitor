@@ -133,7 +133,8 @@ void setup() {
     }
     
     statusLed.begin();
-    statusLed.flash(0, 128, 0, 200); // Green flash on boot (Dimmed)
+    statusLed.begin();
+    // statusLed.flash(0, 128, 0, 200); // REMOVED: Silent Boot
 
     // Load Paired MAC if exists - MOVED down after begin()
 
@@ -179,8 +180,20 @@ void setup() {
     memset(data.name, 0, sizeof(data.name));
     strncpy(data.name, deviceName.c_str(), sizeof(data.name) - 1);
     
-    espNowService.broadcast(data);
-    statusLed.flash(64, 64, 64, 50); // White Flash on Boot Broadcast (Dimmed)
+    // Send Data (Unicast if Paired, Broadcast if Not)
+    bool isPairedLocal = bleService.isPaired(); // or check preferences
+    // Fallback: Check global MAC if flag is inconsistent (as seen in Loop)
+    if (!isPairedLocal && (g_pairedMac[0] != 0 || g_pairedMac[1] != 0)) {
+         isPairedLocal = true;
+    }
+
+    if (isPairedLocal) {
+         espNowService.sendToPeer(data, g_pairedMac);
+         // statusLed.flash(0, 128, 0, 50); // REMOVED: Silent wake-up for sleep mode
+    } else {
+         espNowService.broadcast(data);
+         statusLed.flash(64, 64, 64, 50); // White Flash (Broadcast/Discovery)
+    }
 
     // Update BLE
     bleService.updateTemperature(temp);
