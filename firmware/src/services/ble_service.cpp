@@ -153,6 +153,12 @@ void BleService::begin(const char* deviceName) {
     
     NimBLEAdvertising* pAdvertising = NimBLEDevice::getAdvertising();
     pAdvertising->addServiceUUID(AE_TEMP_SERVICE_UUID);
+    
+    // Explicitly add Name to Scan Response to handle long suffixes
+    NimBLEAdvertisementData oScanResponseData = NimBLEAdvertisementData();
+    oScanResponseData.setName(deviceName);
+    pAdvertising->setScanResponseData(oScanResponseData);
+    
     pAdvertising->setScanResponse(true);
     pAdvertising->start();
     
