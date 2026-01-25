@@ -29,12 +29,12 @@ float TMP102::readTemperature() {
     return val * 0.0625;
 }
 
-void TMP102::shutdown() {
+bool TMP102::shutdown() {
     _wire->beginTransmission(_addr);
     _wire->write(0x01); // Config register
     _wire->write(0x01); // SD bit high (byte 1)
     _wire->write(0x00); // byte 2
-    _wire->endTransmission();
+    return (_wire->endTransmission() == 0);
 }
 
 void TMP102::wakeup() {

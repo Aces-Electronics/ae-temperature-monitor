@@ -4047,6 +4047,18 @@
 		)
 		(uuid "758bb0fe-8768-4896-8467-47a48f0ce759")
 	)
+	(text "Need to shut down LDO when on Batt"
+		(exclude_from_sim no)
+		(at 98.552 157.226 0)
+		(effects
+			(font
+				(size 2.032 2.032)
+				(color 255 62 71 1)
+			)
+			(justify left bottom)
+		)
+		(uuid "89b6f3e6-9c67-4515-bd33-fceae636f493")
+	)
 	(text "USB-C"
 		(exclude_from_sim no)
 		(at 246.253 105.918 0)

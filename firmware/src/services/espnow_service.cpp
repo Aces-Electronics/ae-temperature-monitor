@@ -8,6 +8,8 @@ uint8_t broadcastAddress[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 void EspNowService::onDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
     Serial.print("Last Packet Send Status: ");
     Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Delivery Success" : "Delivery Fail");
+    espNowService.sendFinished = true;
+    espNowService.sendSuccess = (status == ESP_NOW_SEND_SUCCESS);
 }
 
 void EspNowService::begin() {
@@ -112,6 +114,9 @@ void EspNowService::addSecurePeer(const char* macStr, const char* keyStr) {
     
     if (esp_now_add_peer(&peerInfo) == ESP_OK) {
         Serial.printf("Secure Peer Added: %s\n", macStr);
+        Serial.print("Key used: ");
+        for(int i=0; i<16; i++) Serial.printf("%02X", keyBytes[i]);
+        Serial.println();
     } else {
         Serial.println("Failed to Add Secure Peer");
     }

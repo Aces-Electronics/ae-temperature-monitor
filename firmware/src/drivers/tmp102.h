@@ -9,7 +9,7 @@ public:
     TMP102(uint8_t addr = 0x48);
     bool begin(int sda, int scl);
     float readTemperature();
-    void shutdown();
+    bool shutdown();
     void wakeup();
 
 private:

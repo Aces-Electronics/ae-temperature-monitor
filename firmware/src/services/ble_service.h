@@ -18,6 +18,7 @@ public:
     bool isPaired();
     void setPaired(bool paired);
     void setPairingDataCallback(std::function<void(const char*)> cb);
+    void startAdvertising();
     
     // Make callback accessible to friend class or just public helper
     std::function<void(const char*)> _pairingDataCallback;

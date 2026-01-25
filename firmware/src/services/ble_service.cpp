@@ -37,7 +37,7 @@ class PairedCallback: public NimBLECharacteristicCallbacks {
         std::string value = pCharacteristic->getValue();
         if (value.length() > 0) {
             String valStr = String(value.c_str());
-            Serial.printf("Paired Char Write: %s\n", valStr.c_str());
+            Serial.printf("[BLE WRITE] Paired/Reset Command: %s\n", valStr.c_str());
             
             if (valStr.startsWith("{")) {
                 // JSON Payload -> Pairing Data
@@ -65,7 +65,7 @@ class SleepCallback: public NimBLECharacteristicCallbacks {
         if (value.length() == 4) {
              uint32_t interval = *(uint32_t*)value.data();
              bleService.setSleepInterval(interval);
-             Serial.printf("New sleep interval: %d ms\n", interval);
+             Serial.printf("[BLE WRITE] Sleep Interval: %d ms\n", interval);
         }
     }
 };
@@ -78,7 +78,7 @@ class NameCallback: public NimBLECharacteristicCallbacks {
              // But we need to pass it back to main for NVS save? Or handle inside BleService if we pass Preferences?
              // Main handles NVS for simplicity as it has the Preferences object.
              // We need a callback mechanism.
-             Serial.printf("New Name: %s\n", value.c_str());
+             Serial.printf("[BLE WRITE] Device Name: %s\n", value.c_str());
              bleService.updateName(value.c_str()); // Helper to notify listener
         }
     }
@@ -148,12 +148,12 @@ void BleService::begin(const char* deviceName) {
     _pPairedChar->setValue(mac.c_str());
     _pPairedChar->setCallbacks(new PairedCallback());
 
+    // Start Service
     _pService->start();
 
-    
+    // Start Advertising
     NimBLEAdvertising* pAdvertising = NimBLEDevice::getAdvertising();
-    pAdvertising->addServiceUUID(AE_TEMP_SERVICE_UUID);
-    
+    pAdvertising->addServiceUUID(AE_TEMP_SERVICE_UUID); // Advertise Service UUID
     // Explicitly add Name to Scan Response to handle long suffixes
     NimBLEAdvertisementData oScanResponseData = NimBLEAdvertisementData();
     oScanResponseData.setName(deviceName);
@@ -234,4 +234,12 @@ bool BleService::isPaired() {
 
 void BleService::setPaired(bool paired) {
     _isPaired = paired;
+}
+
+void BleService::startAdvertising() {
+    NimBLEAdvertising* pAdvertising = NimBLEDevice::getAdvertising();
+    if (pAdvertising) {
+        pAdvertising->start();
+        Serial.println("[BLE] Advertising Restarted");
+    }
 }

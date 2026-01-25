@@ -20,9 +20,17 @@ public:
     void broadcast(const TempSensorData& data);
     void sendToPeer(const TempSensorData& data, const uint8_t* peerMac);
     void addSecurePeer(const char* macStr, const char* keyStr);
+    
+    void setForceBroadcast(bool force) { m_forceBroadcast = force; }
+    bool isForceBroadcast() { return m_forceBroadcast; }
+    
+    volatile bool sendFinished = false;
+    volatile bool sendSuccess = false;
+    void resetSendStatus() { sendFinished = false; sendSuccess = false; }
 
 private:
     static void onDataSent(const uint8_t *mac_addr, esp_now_send_status_t status);
+    bool m_forceBroadcast = false;
 };
 
 extern EspNowService espNowService;

@@ -6,12 +6,15 @@
 #include "services/ble_service.h"
 #include "services/espnow_service.h"
 #include <nvs_flash.h>
+#include <driver/gpio.h>
 
 // Pins
 #define I2C_SDA 8
 #define I2C_SCL 9
 #define NEOPIXEL_PWR 5
+#define NEOPIXEL_PWR 5
 #define NEOPIXEL_DATA 3
+#define BOOT_PIN 9
 
 // Globals
 TMP102 tmp102;
@@ -24,13 +27,32 @@ Preferences preferences;
 
 unsigned long stateStartTime = 0;
 bool isStayingAwake = false;
+
 uint8_t g_pairedMac[6] = {0}; // Global storage for paired MAC
+bool g_isTimerWakeup = false;
 
 void setup() {
     Serial.begin(115200);
     // Wait a bit for serial if USB connected
     delay(1000); 
     Serial.println("AE Temp Sensor Starting...");
+    
+    gpio_hold_dis((gpio_num_t)NEOPIXEL_PWR);
+    gpio_hold_dis((gpio_num_t)NEOPIXEL_DATA); // Release Data Pin Hold
+    gpio_deep_sleep_hold_dis(); 
+    gpio_deep_sleep_hold_dis(); // Ensure global hold is off if used
+    
+    // Init Boot Pin
+    pinMode(BOOT_PIN, INPUT_PULLUP);
+
+    // Check Wakeup Cause
+    if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_TIMER) {
+        g_isTimerWakeup = true;
+        Serial.println("Wakeup: TIMER (Fast Sleep Mode)");
+    } else {
+        Serial.println("Wakeup: MANUAL/POWER (POR) -> Staying Awake 30s");
+        isStayingAwake = true; // Ensure 30s awake window on boot/manual reset
+    }
 
     // Init NVS
     preferences.begin("ae-temp", false);
@@ -78,7 +100,15 @@ void setup() {
     
     // Handle JSON Pairing Data {"gauge_mac":"...", "key":"..."}
     bleService.setPairingDataCallback([](const char* json) {
-        Serial.printf("Processing Pairing JSON: %s\n", json);
+        Serial.printf("Processing Pairing JSON/CMD: %s\n", json);
+        
+        if (String(json) == "PAIRING") {
+            Serial.println("Received PAIRING command via BLE. Forcing broadcast mode for 5 mins.");
+            espNowService.setForceBroadcast(true);
+            // We use a global or local static to track time
+            return;
+        }
+
         // Minimal JSON parsing to avoid heavy library usage if possible, or use ArduinoJson if available (user has it in other projects)
         // Let's assume ArduinoJson is available or use String search
         String j = String(json);
@@ -130,6 +160,7 @@ void setup() {
         Serial.println("TMP102 Init Failed!");
     } else {
         tmp102.wakeup(); // Ensure continuous conversion mode
+        delay(35);       // Allow time for first conversion (26ms typical)
     }
     
     statusLed.begin();
@@ -164,35 +195,48 @@ void setup() {
     float temp = tmp102.readTemperature();
     Serial.printf("Temperature: %.2f C\n", temp);
     
+    // Reset Send Status before sending
+    espNowService.resetSendStatus();
+
     // Broadcast ESPNow
     TempSensorData data;
     data.id = 22;
     data.temperature = temp;
-
-    data.batteryVoltage = 3.3; // Placeholder, need ADC read if circuit supports it
+    data.batteryVoltage = 3.3; // Placeholder
     data.batteryLevel = 100;   // Placeholder
-    
-    // Set initial update interval (Booting... likely going to sleep soon unless connected)
-    // Default to configured sleep interval
-    data.updateInterval = sleepInterval;
-
-    // Copy name safely
+    data.updateInterval = bleService.getSleepInterval();
     memset(data.name, 0, sizeof(data.name));
     strncpy(data.name, deviceName.c_str(), sizeof(data.name) - 1);
-    
+
     // Send Data (Unicast if Paired, Broadcast if Not)
-    bool isPairedLocal = bleService.isPaired(); // or check preferences
-    // Fallback: Check global MAC if flag is inconsistent (as seen in Loop)
+    bool isPairedLocal = bleService.isPaired(); 
+    // Fallback: Check global MAC if flag is inconsistent
     if (!isPairedLocal && (g_pairedMac[0] != 0 || g_pairedMac[1] != 0)) {
          isPairedLocal = true;
     }
 
     if (isPairedLocal) {
          espNowService.sendToPeer(data, g_pairedMac);
-         // statusLed.flash(0, 128, 0, 50); // REMOVED: Silent wake-up for sleep mode
     } else {
          espNowService.broadcast(data);
          statusLed.flash(64, 64, 64, 50); // White Flash (Broadcast/Discovery)
+    }
+
+    // WAIT FOR SEND FINISH (Essential for Fast Sleep)
+    unsigned long sendStart = millis();
+    while (!espNowService.sendFinished && (millis() - sendStart < 100)) {
+        delay(1);
+    }
+    
+    if (espNowService.sendFinished) {
+         if (espNowService.sendSuccess) {
+             delay(5); // success, small buffer
+         } else {
+             Serial.println("ESP-NOW Send Failed!");
+             statusLed.flash(255, 128, 0, 50); // Orange Flash (Send Fail)
+         }
+    } else {
+         Serial.println("ESP-NOW Send Timeout!");
     }
 
     // Update BLE
@@ -254,31 +298,33 @@ void loop() {
                  }
             }
             
-            if (isPaired) {
-                 // UNICAST ENCRYPTED to GAUGE
-                 // Note: We need to know the Gauge's MAC (it's in g_pairedMac/Preferences)
-                 // But wait, the Gauge is usually the AP/Receiver.
-                 // Actually ESP-NOW is peer-to-peer.
-                 // We added the secure peer in setPairedCallback.
+            if (isPaired || espNowService.isForceBroadcast()) {
+                 // UNICAST ENCRYPTED to GAUGE (or Broadcast if forced)
+                 if (espNowService.isForceBroadcast()) {
+                      // Forced Broadcast during Pairing
+                      Serial.println("PAIRING MODE: Sending Broadcast Burst...");
+                      statusLed.flash(0, 0, 128, 50); 
+                      for (int ch = 1; ch <= 13; ch++) {
+                         esp_wifi_set_channel(ch, WIFI_SECOND_CHAN_NONE);
+                         delay(10); 
+                         espNowService.broadcast(data);
+                      }
+                      esp_wifi_set_channel(1, WIFI_SECOND_CHAN_NONE);
+                      
+                      static unsigned long pairingStartTime = millis();
+                      if (millis() - pairingStartTime > 300000) {
+                          Serial.println("Pairing Mode Timeout (5 mins).");
+                          espNowService.setForceBroadcast(false);
+                      }
+                 }
                  
-                 // We need to pass the target MAC to broadcast()? Or update broadcast() to take an address.
-                 // For now, let's just make broadcast() use the stored peer or broadcast depending on state.
-                 // BUT wait, broadcast() in service hardcodes "broadcastAddress".
-                 // We need to overload it or change it.
-                 // Let's modify broadcast() to take an optional address.
-                 
-                 // Actually, if we are paired, we should ONLY talk to the Gauge?
-                 // Or do we still broadcast for others?
-                 // Gauge expects "ID 22" from Sensor. 
-                 // If encrypted, Gauge decrypts.
-                 
-                 // We need to expose a method `sendToPeer(data, mac)` in EspNowService.
-                 
-                 espNowService.sendToPeer(data, g_pairedMac);
-                 statusLed.flash(0, 128, 0, 50); // Green Flash on Unicast (Dimmed)
+                 if (isPaired) {
+                      espNowService.sendToPeer(data, g_pairedMac);
+                      statusLed.flash(0, 128, 0, 50); // Green Flash on Unicast (Dimmed)
+                 }
             } else {
                  // BROADCAST Cycling (Hunt for Gauge)
-                 // Only needed during pairing/discovery
+                 // Only needed during initial discovery when NOT paired
                  statusLed.flash(0, 0, 128, 50); // Blue Flash on Broadcast Burst (Dimmed)
                  for (int ch = 1; ch <= 13; ch++) {
                     esp_wifi_set_channel(ch, WIFI_SECOND_CHAN_NONE);
@@ -296,14 +342,81 @@ void loop() {
 
     // Deep Sleep Logic: Only if Paired
     if (bleService.isPaired()) {
-        if (!isStayingAwake && (millis() - stateStartTime > AWAKE_TIME_MS)) {
-            Serial.println("Going to sleep...");
-            statusLed.off();
-            tmp102.shutdown();
+        uint32_t awakeWindow = g_isTimerWakeup ? 200 : AWAKE_TIME_MS; 
+        
+        if (!isStayingAwake && (millis() - stateStartTime > awakeWindow)) {
+            uint32_t sleepMs = bleService.getSleepInterval();
             
-            uint64_t sleepUs = (uint64_t)bleService.getSleepInterval() * 1000ULL;
-            esp_sleep_enable_timer_wakeup(sleepUs);
-            esp_deep_sleep_start();
+            // Only sleep if interval is > 0. If 0, we stay awake (Always On).
+            if (sleepMs > 0) {
+                Serial.printf("Going to sleep for %u ms...\n", sleepMs);
+                statusLed.off();
+                // Shutdown Sensor
+                if (!tmp102.shutdown()) {
+                    Serial.println("TMP102 Shutdown Failed!");
+                    statusLed.flash(255, 0, 0, 50); // Red Flash
+                }
+                
+                // --- PHANTOM POWER FIX ---
+                // Drive Data Pin LOW and Hold it to prevent leakage into LED
+                pinMode(NEOPIXEL_DATA, OUTPUT);
+                digitalWrite(NEOPIXEL_DATA, LOW);
+                gpio_hold_en((gpio_num_t)NEOPIXEL_DATA);
+
+                // Hold NeoPixel Power LOW
+                gpio_hold_en((gpio_num_t)NEOPIXEL_PWR);
+                gpio_deep_sleep_hold_en(); // Enable Global Hold Logic
+                
+                // --- I2C BUS RECOVERY & LEAKAGE FIX ---
+                Wire.end(); // Stop I2C Driver
+                
+                // Manual Bus Clear: Toggle SCL 9 times to unstick slave
+                pinMode(I2C_SDA, INPUT_PULLUP);
+                pinMode(I2C_SCL, OUTPUT);
+                for (int i = 0; i < 9; i++) {
+                    digitalWrite(I2C_SCL, HIGH);
+                    delayMicroseconds(5);
+                    digitalWrite(I2C_SCL, LOW);
+                    delayMicroseconds(5);
+                }
+                // Stop Condition (SDA Low -> High while SCL High)
+                pinMode(I2C_SDA, OUTPUT);
+                digitalWrite(I2C_SDA, LOW);
+                delayMicroseconds(5);
+                digitalWrite(I2C_SCL, HIGH);
+                delayMicroseconds(5);
+                digitalWrite(I2C_SDA, HIGH);
+                delayMicroseconds(5);
+
+                // Final State: Input Pullup (High-Z + Pullup)
+                pinMode(I2C_SDA, INPUT_PULLUP);
+                pinMode(I2C_SCL, INPUT_PULLUP); 
+
+                // --- GPIO WAKEUP FIX ---
+                // Explicitly valid input config for Deep Sleep (AFTER Reset)
+                gpio_config_t io_conf = {};
+                io_conf.intr_type = GPIO_INTR_DISABLE;
+                io_conf.mode = GPIO_MODE_INPUT;
+                io_conf.pin_bit_mask = (1ULL << BOOT_PIN);
+                io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
+                io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
+                gpio_config(&io_conf);
+
+                // --- DEEP SLEEP START ---
+                // Note: GPIO9 (Boot) is NOT an RTC pin on C3, so we cannot wake from it in Deep Sleep.
+                // We only wake on Timer.
+                
+                uint64_t sleepUs = (uint64_t)sleepMs * 1000ULL;
+                esp_sleep_enable_timer_wakeup(sleepUs);
+                esp_deep_sleep_start();
+            } else {
+                 // Optional: Periodic debug to confirm we are awake
+                 static unsigned long lastAwakeLog = 0;
+                 if (millis() - lastAwakeLog > 10000) {
+                     Serial.println("Always On Mode: Staying Awake...");
+                     lastAwakeLog = millis();
+                 }
+            }
         }
     } else {
         // Not Paired: Stay Awake, Blue heartbeat to indicate "Ready to Pair"
