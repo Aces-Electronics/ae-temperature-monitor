@@ -283,7 +283,7 @@ void loop() {
 
             String suffix = preferences.getString("name", "");
             String nameForEspNow = "AE Temp Sensor";
-            if (suffix.length() > 0) nameForEspNow = suffix;
+            if (suffix.length() > 0) nameForEspNow += " - " + suffix;
             
             // Start with Generic Broadcast Address
             memset(data.name, 0, sizeof(data.name));
