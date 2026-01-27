@@ -206,6 +206,7 @@ void setup() {
     data.batteryLevel = 100;   // Placeholder
     data.updateInterval = bleService.getSleepInterval();
     data.hardwareVersion = HW_VERSION;
+    strncpy(data.firmwareVersion, String(OTA_VERSION).c_str(), sizeof(data.firmwareVersion) - 1);
     memset(data.name, 0, sizeof(data.name));
     strncpy(data.name, deviceName.c_str(), sizeof(data.name) - 1);
 
@@ -278,6 +279,7 @@ void loop() {
             data.batteryLevel = 100;
             data.updateInterval = 5000; // 5 seconds when connected/awake
             data.hardwareVersion = HW_VERSION;
+            strncpy(data.firmwareVersion, String(OTA_VERSION).c_str(), sizeof(data.firmwareVersion) - 1);
 
             String suffix = preferences.getString("name", "");
             String nameForEspNow = "AE Temp Sensor";

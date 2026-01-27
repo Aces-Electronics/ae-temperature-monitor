@@ -4,16 +4,9 @@
 #include <Arduino.h>
 #include <esp_now.h>
 #include <WiFi.h>
+#include "shared_defs.h"
 
-struct TempSensorData {
-    uint8_t id; // 22 for Temp Sensor
-    float temperature;
-    float batteryVoltage;
-    uint8_t batteryLevel;
-    uint32_t updateInterval; // Expected time until next packet (ms)
-    char name[16];
-    uint8_t hardwareVersion;  // Hardware revision number
-} __attribute__((packed));
+typedef struct_message_temp_sensor TempSensorData;
 
 class EspNowService {
 public:
