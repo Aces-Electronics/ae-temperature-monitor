@@ -12,6 +12,7 @@ struct TempSensorData {
     uint8_t batteryLevel;
     uint32_t updateInterval; // Expected time until next packet (ms)
     char name[16];
+    uint8_t hardwareVersion;  // Hardware revision number
 } __attribute__((packed));
 
 class EspNowService {
