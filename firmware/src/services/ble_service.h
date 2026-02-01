@@ -4,6 +4,12 @@
 #include <NimBLEDevice.h>
 
 class BleService {
+    friend class PairedCallback;
+    friend class WifiSsidCallback;
+    friend class WifiPassCallback;
+    friend class SleepCallback;
+    friend class NameCallback;
+    
 public:
     void begin(const char* deviceName);
     void updateTemperature(float temp);
