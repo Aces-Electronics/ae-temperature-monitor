@@ -173,6 +173,33 @@ void setup() {
         }
     });
 
+    bleService.setWifiCallback([](const char* ssid, const char* pass) {
+        Serial.printf("Received WiFi Creds via BLE: SSID='%s'\n", ssid);
+        // Store in global trigger struct for upcoming OTA
+        memset(&g_otaTrigger, 0, sizeof(g_otaTrigger)); // Clear first to avoid garbage
+        g_otaTrigger.messageID = 110;
+        strncpy(g_otaTrigger.ssid, ssid, sizeof(g_otaTrigger.ssid) - 1);
+        strncpy(g_otaTrigger.pass, pass, sizeof(g_otaTrigger.pass) - 1);
+        // Force flag is set in Force Callback
+    });
+
+    bleService.setForceOtaCallback([]() {
+        Serial.println("FORCE OTA Triggered via Direct BLE!");
+        // We assume WiFi creds were just sent.
+        // If not, we might fail to connect.
+        // Check if SSID is present?
+        if (strlen(g_otaTrigger.ssid) == 0) {
+             Serial.println("Aborting Force OTA: No WiFi SSID set.");
+             return;
+        }
+
+        g_otaTrigger.messageID = 110;
+        g_otaTrigger.force = true;
+        // URL left empty -> triggers OTA::isUpdateAvailable() logic in loop()
+        
+        g_indirectOtaPending = true;
+    });
+
     // Init Drivers
     Wire.begin(I2C_SDA, I2C_SCL); // Init Wire before TMP102
     if (!tmp102.begin(I2C_SDA, I2C_SCL)) {
@@ -479,21 +506,33 @@ void loop() {
             OTA::init(client);
 
             OTA::UpdateObject obj;
-            obj.condition = OTA::NEW_DIFFERENT;
-            obj.tag_name = String(g_otaTrigger.version);
-            
             String url = String(g_otaTrigger.url);
-             if (url.startsWith("http")) {
-                int protoEnd = url.indexOf("://");
-                int pathStart = url.indexOf("/", protoEnd + 3);
-                if (pathStart > 0) {
-                    obj.redirect_server = url.substring(protoEnd + 3, pathStart);
-                    obj.firmware_asset_endpoint = url.substring(pathStart);
+
+            if (g_otaTrigger.force && url.length() == 0) {
+                 Serial.println("[OTA] Force Update with Empty URL. Checking Defaults...");
+                 obj = OTA::isUpdateAvailable();
+                 if (obj.condition != OTA::NO_UPDATE) {
+                     Serial.println("[OTA] Default Update Found. Forcing Install.");
+                     obj.condition = OTA::NEW_DIFFERENT;
+                 } else {
+                     Serial.println("[OTA] No Default Update Found to Force.");
+                 }
+            } else {
+                obj.condition = OTA::NEW_DIFFERENT;
+                obj.tag_name = String(g_otaTrigger.version);
+                
+                if (url.startsWith("http")) {
+                    int protoEnd = url.indexOf("://");
+                    int pathStart = url.indexOf("/", protoEnd + 3);
+                    if (pathStart > 0) {
+                        obj.redirect_server = url.substring(protoEnd + 3, pathStart);
+                        obj.firmware_asset_endpoint = url.substring(pathStart);
+                    } else {
+                        obj.firmware_asset_endpoint = url;
+                    }
                 } else {
                     obj.firmware_asset_endpoint = url;
                 }
-            } else {
-                obj.firmware_asset_endpoint = url;
             }
 
             if (OTA::performUpdate(&obj, true, true, nullptr) == OTA::SUCCESS) {

@@ -20,6 +20,8 @@
 #define CHAR_BATT_UUID       "beb5483e-36e1-4688-b7f5-ea07361b26ac"
 #define CHAR_NAME_UUID       "beb5483e-36e1-4688-b7f5-ea07361b26ad"
 #define CHAR_PAIRED_UUID     "beb5483e-36e1-4688-b7f5-ea07361b26ae"
+#define WIFI_SSID_CHAR_UUID  "5A1B2C3D-4E5F-6A7B-8C9D-0E1F2A3B4C62"
+#define WIFI_PASS_CHAR_UUID  "6A1B2C3D-4E5F-6A7B-8C9D-0E1F2A3B4C63"
 
 BleService bleService;
 
@@ -41,20 +43,46 @@ class PairedCallback: public NimBLECharacteristicCallbacks {
             
             if (valStr.startsWith("{")) {
                 // JSON Payload -> Pairing Data
-                // Let Main handle the parsing via callback
                 if (bleService._pairingDataCallback) {
                      bleService._pairingDataCallback(valStr.c_str());
                 }
+            } else if (valStr == "FORCE_OTA") {
+                 Serial.println("[BLE] FORCE_OTA command received.");
+                 if (bleService._forceOtaCallback) {
+                      bleService._forceOtaCallback();
+                 }
             } else if (valStr == "RESET" || valStr == "UNPAIR") {
                 // Reset Command
                  Serial.println("Received RESET command");
                  bleService.updatePaired(false);
-            } else {
-                 // Legacy bool/byte support (optional, or just ignore)
-                 // uint8_t byteVal = (uint8_t)value[0];
-                 // bool p = (byteVal != 0);
-                 // bleService.updatePaired(p);
-            }
+            } 
+        }
+    }
+};
+
+class WifiSsidCallback: public NimBLECharacteristicCallbacks {
+    void onWrite(NimBLECharacteristic* pCharacteristic) {
+        std::string value = pCharacteristic->getValue();
+        if (value.length() > 0) {
+             bleService._tempSsid = String(value.c_str());
+             Serial.printf("[BLE WRITE] WiFi SSID: %s\n", bleService._tempSsid.c_str());
+             // Pass partial or full data. If Pass is already set, this might be a refresh.
+             if (bleService._wifiCallback) {
+                  bleService._wifiCallback(bleService._tempSsid.c_str(), bleService._tempPass.c_str());
+             }
+        }
+    }
+};
+
+class WifiPassCallback: public NimBLECharacteristicCallbacks {
+    void onWrite(NimBLECharacteristic* pCharacteristic) {
+        std::string value = pCharacteristic->getValue();
+        if (value.length() > 0) {
+             bleService._tempPass = String(value.c_str());
+             Serial.println("[BLE WRITE] WiFi Pass received");
+             if (bleService._wifiCallback) {
+                  bleService._wifiCallback(bleService._tempSsid.c_str(), bleService._tempPass.c_str());
+             }
         }
     }
 };
@@ -74,10 +102,6 @@ class NameCallback: public NimBLECharacteristicCallbacks {
     void onWrite(NimBLECharacteristic* pCharacteristic) {
         std::string value = pCharacteristic->getValue();
         if (value.length() > 0) {
-             // Assuming bleService has a public method orfriendship to trigger main callback
-             // But we need to pass it back to main for NVS save? Or handle inside BleService if we pass Preferences?
-             // Main handles NVS for simplicity as it has the Preferences object.
-             // We need a callback mechanism.
              Serial.printf("[BLE WRITE] Device Name: %s\n", value.c_str());
              bleService.updateName(value.c_str()); // Helper to notify listener
         }
@@ -137,8 +161,6 @@ void BleService::begin(const char* deviceName) {
     _pNameChar->setValue(deviceName);
 
     // PAIRED Characteristic
-    // 1. READ: Returns WiFi MAC Address (needed by App to match QR code target)
-    // 2. WRITE: Accepts JSON payload {"gauge_mac": "...", "key": "..."} OR "RESET"
     _pPairedChar = _pService->createCharacteristic(
         CHAR_PAIRED_UUID,
         NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::NOTIFY | NIMBLE_PROPERTY::READ_ENC | NIMBLE_PROPERTY::WRITE_ENC
@@ -147,6 +169,19 @@ void BleService::begin(const char* deviceName) {
     String mac = WiFi.macAddress();
     _pPairedChar->setValue(mac.c_str());
     _pPairedChar->setCallbacks(new PairedCallback());
+
+    // WIFI Credentials
+    _pWifiSsidChar = _pService->createCharacteristic(
+        WIFI_SSID_CHAR_UUID,
+         NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_ENC
+    );
+    _pWifiSsidChar->setCallbacks(new WifiSsidCallback());
+    
+    _pWifiPassChar = _pService->createCharacteristic(
+        WIFI_PASS_CHAR_UUID,
+         NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_ENC
+    );
+    _pWifiPassChar->setCallbacks(new WifiPassCallback());
 
     // Start Service
     _pService->start();
@@ -214,6 +249,14 @@ void BleService::setPairedCallback(std::function<void(bool)> cb) {
 
 void BleService::setPairingDataCallback(std::function<void(const char*)> cb) {
     _pairingDataCallback = cb;
+}
+
+void BleService::setWifiCallback(std::function<void(const char*, const char*)> cb) {
+    _wifiCallback = cb;
+}
+
+void BleService::setForceOtaCallback(std::function<void()> cb) {
+    _forceOtaCallback = cb;
 }
 
 uint32_t BleService::getSleepInterval() {

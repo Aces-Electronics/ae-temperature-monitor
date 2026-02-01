@@ -18,6 +18,8 @@ public:
     bool isPaired();
     void setPaired(bool paired);
     void setPairingDataCallback(std::function<void(const char*)> cb);
+    void setWifiCallback(std::function<void(const char*, const char*)> cb);
+    void setForceOtaCallback(std::function<void()> cb);
     void startAdvertising();
     
     // Make callback accessible to friend class or just public helper
@@ -34,13 +36,21 @@ private:
     NimBLECharacteristic* _pBattChar;
     NimBLECharacteristic* _pNameChar;
     NimBLECharacteristic* _pPairedChar;
+    NimBLECharacteristic* _pWifiSsidChar;
+    NimBLECharacteristic* _pWifiPassChar;
     
     std::function<void(const char*)> _nameCallback;
     std::function<void(bool)> _pairedCallback;
+    std::function<void(const char*, const char*)> _wifiCallback;
+    std::function<void()> _forceOtaCallback;
     
     bool _deviceConnected = false;
     uint32_t _sleepIntervalMs = 900000; // Default 15 mins
     bool _isPaired = false;
+    
+    // Temp storage for WiFi creds until both are received or processed
+    String _tempSsid;
+    String _tempPass;
 };
 
 extern BleService bleService;
