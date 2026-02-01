@@ -36,6 +36,10 @@ void EspNowService::begin() {
     }
 }
 
+void EspNowService::registerRecvCallback(esp_now_recv_cb_t callback) {
+    esp_now_register_recv_cb(callback);
+}
+
 void EspNowService::broadcast(const TempSensorData& data) {
     Serial.println("=== Temp Sensor ===");
     Serial.printf("ID             : %d\n", data.id);

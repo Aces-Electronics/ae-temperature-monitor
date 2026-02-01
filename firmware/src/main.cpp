@@ -16,6 +16,9 @@
 #define NEOPIXEL_DATA 3
 #define BOOT_PIN 9
 
+#include <OTA-Hub.hpp>
+#include <ota-github-cacerts.h>
+
 // Globals
 TMP102 tmp102;
 StatusLed statusLed(NEOPIXEL_PWR, NEOPIXEL_DATA);
@@ -30,6 +33,21 @@ bool isStayingAwake = false;
 
 uint8_t g_pairedMac[6] = {0}; // Global storage for paired MAC
 bool g_isTimerWakeup = false;
+
+volatile bool g_indirectOtaPending = false;
+struct_message_ota_trigger g_otaTrigger;
+
+void onDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len) {
+    if (len == sizeof(struct_message_ota_trigger)) {
+        struct_message_ota_trigger trigger;
+        memcpy(&trigger, incomingData, sizeof(trigger));
+        if (trigger.messageID == 110) {
+            Serial.println("[ESP-NOW] OTA Trigger Received!");
+            memcpy((void*)&g_otaTrigger, &trigger, sizeof(g_otaTrigger));
+            g_indirectOtaPending = true;
+        }
+    }
+}
 
 void setup() {
     Serial.begin(115200);
@@ -171,6 +189,7 @@ void setup() {
 
     // Init Services
     espNowService.begin();
+    espNowService.registerRecvCallback(onDataRecv);
     bleService.begin(deviceName.c_str());
     // Ensure the characteristic holds only the suffix for editing
     bleService.updateName(nameSuffix.c_str());
@@ -429,6 +448,61 @@ void loop() {
              statusLed.flash(0, 0, 25, 100); // Faint Blue (Dimmed from 50)
              lastFlash = millis();
         }
+    }
+
+    // OTA Execution Logic
+    if (g_indirectOtaPending) {
+        g_indirectOtaPending = false;
+        Serial.println("[OTA] Starting Update Process...");
+        
+        statusLed.flash(0, 0, 255, 500); // Blue Long Flash
+        
+        WiFi.disconnect(true);
+        WiFi.mode(WIFI_STA);
+        WiFi.begin(g_otaTrigger.ssid, g_otaTrigger.pass);
+        
+        int tries = 0;
+        while (WiFi.status() != WL_CONNECTED && tries < 30) {
+            delay(500);
+            tries++;
+            Serial.print(".");
+        }
+        
+        if (WiFi.status() == WL_CONNECTED) {
+            Serial.println("\n[OTA] WiFi Connected. Syncing Time...");
+            configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+            delay(2000); 
+            
+            WiFiClientSecure client;
+            client.setCACert(OTAGH_CA_CERT);
+            OTA::init(client);
+
+            UpdateObject obj;
+            obj.condition = OTA::NEW_DIFFERENT;
+            obj.tag_name = String(g_otaTrigger.version);
+            
+            String url = String(g_otaTrigger.url);
+             if (url.startsWith("http")) {
+                int protoEnd = url.indexOf("://");
+                int pathStart = url.indexOf("/", protoEnd + 3);
+                if (pathStart > 0) {
+                    obj.redirect_server = url.substring(protoEnd + 3, pathStart);
+                    obj.firmware_asset_endpoint = url.substring(pathStart);
+                } else {
+                    obj.firmware_asset_endpoint = url;
+                }
+            } else {
+                obj.firmware_asset_endpoint = url;
+            }
+
+            if (OTA::performUpdate(&obj, true, true, nullptr) == OTA::SUCCESS) {
+                Serial.println("[OTA] Success! Restarting...");
+                delay(1000);
+                ESP.restart();
+            }
+        }
+        Serial.println("\n[OTA] Failed or Canceled.");
+        ESP.restart();
     }
     
     delay(10);

@@ -11,6 +11,7 @@ typedef struct_message_temp_sensor TempSensorData;
 class EspNowService {
 public:
     void begin();
+    void registerRecvCallback(esp_now_recv_cb_t callback);
     void broadcast(const TempSensorData& data);
     void sendToPeer(const TempSensorData& data, const uint8_t* peerMac);
     void addSecurePeer(const char* macStr, const char* keyStr);
