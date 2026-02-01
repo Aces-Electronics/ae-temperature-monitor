@@ -4,9 +4,10 @@
 #include "drivers/tmp102.h"
 #include "drivers/neopixel.h"
 #include "services/ble_service.h"
-#include "services/espnow_service.h"
+#include <services/espnow_service.h>
 #include <nvs_flash.h>
 #include <driver/gpio.h>
+#include <WiFiClientSecure.h>
 
 // Pins
 #define I2C_SDA 8
@@ -477,7 +478,7 @@ void loop() {
             client.setCACert(OTAGH_CA_CERT);
             OTA::init(client);
 
-            UpdateObject obj;
+            OTA::UpdateObject obj;
             obj.condition = OTA::NEW_DIFFERENT;
             obj.tag_name = String(g_otaTrigger.version);
             
