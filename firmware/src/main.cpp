@@ -43,7 +43,16 @@ void onDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len) {
         struct_message_ota_trigger trigger;
         memcpy(&trigger, incomingData, sizeof(trigger));
         if (trigger.messageID == 110) {
-            Serial.println("[ESP-NOW] OTA Trigger Received!");
+            trigger.version[sizeof(trigger.version)-1] = '\0'; // Safety
+            Serial.printf("[ESP-NOW] OTA Trigger: Ver='%s' (Current='%s'), Force=%d\n", 
+                          trigger.version, OTA_VERSION, trigger.force);
+
+            if (!trigger.force && strcmp(trigger.version, OTA_VERSION) == 0) {
+                Serial.println("[ESP-NOW] OTA Ignored: Already on target version.");
+                return;
+            }
+
+            Serial.println("[ESP-NOW] OTA Trigger Accepted!");
             memcpy((void*)&g_otaTrigger, &trigger, sizeof(g_otaTrigger));
             g_indirectOtaPending = true;
         }
