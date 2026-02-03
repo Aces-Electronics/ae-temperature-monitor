@@ -14,4 +14,9 @@ The Sensor broadcasts a `struct_message_temp_sensor` payload which is received b
 The project uses PlatformIO.
 ```bash
 pio run -t upload
+pio run -t upload
 ```
+
+## OTA Reliability
+- **Loop Prevention**: Rejects updates if the version matches the currently installed firmware.
+- **JIT Delivery**: Updates are pushed via the Shunt gateway immediately after an uplink.
